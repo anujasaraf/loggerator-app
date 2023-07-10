@@ -1,0 +1,88 @@
+services:
+  db:
+    container_name: docker.loggerator.db
+    image: cassandra:3.11.2
+    environment:
+      - "MAX_HEAP_SIZE=256M"
+      - "HEAP_NEWSIZE=128M"
+    ports:
+      - "9042:9042"
+      - "7199:7199"
+    healthcheck:
+      test: [ "CMD-SHELL", " nodetool status system_schema" ]
+      interval: 10s
+      retries: 10
+    networks:
+      - loggerator_network
+
+  db-bootstrap-schema:
+    container_name: db-bootstrap-schema
+    image: cassandra:3.11.2
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: on-failure
+    volumes:
+      - ./src/main/resources/schema:/schema
+    command: /bin/bash -c "echo loading cassandra keyspace && cqlsh docker.loggerator.db -f /schema/keyspace.cql && cqlsh docker.loggerator.db -f /schema/schema.cql"
+    networks:
+      - loggerator_network
+
+  loggerator:
+    container_name: loggerator.source
+    image: gcr.io/hiring-278615/loggerator
+    ports:
+      - 8000:8080
+    healthcheck:
+      test: [ "CMD-SHELL", " netstat -an | grep -q 8080" ]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+    command:
+      - --count
+      - $COUNT
+      - --seed
+      - $SEED
+    networks:
+      - loggerator_network
+
+  loggerator-app:
+    image: docker.io/library/loggerator-app:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        SERVICE_VERSION: $SERVICE_VERSION
+    environment:
+      JAVA_OPTS: >
+        -Dlogging.file.path=/var/log/loggerator 
+        -Dspring.profiles.active=dev 
+        -Dspring.cassandra.contact-points=docker.loggerator.db:9042
+        -Dlog.loggerator.host=loggerator.source
+        -Dlog.loggerator.port=8080
+    ports:
+      - 8080:8080
+      - 8081:8081
+    links:
+      - db
+      - db-bootstrap-schema
+      - loggerator
+    depends_on:
+      db:
+        condition: service_healthy
+      loggerator:
+        condition: service_healthy
+      db-bootstrap-schema:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [ "CMD-SHELL", " netstat -an | grep -q 8080" ]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+    networks:
+      - loggerator_network
+
+
+networks:
+  loggerator_network:
+    driver: bridge

@@ -1,0 +1,3 @@
+DROP MATERIALIZED VIEW logbyts_mv;
+DROP TABLE log;
+DROP KEYSPACE loggerator;

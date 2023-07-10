@@ -1,0 +1,63 @@
+FROM ubuntu:20.04
+
+ARG version=17.0.7.7-1
+
+RUN set -eux \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        curl ca-certificates gnupg software-properties-common fontconfig java-common \
+    && curl -fL https://apt.corretto.aws/corretto.key | apt-key add - \
+    && add-apt-repository 'deb https://apt.corretto.aws stable main' \
+    && mkdir -p /usr/share/man/man1 || true \
+    && apt-get update \
+    && apt-get install -y java-17-amazon-corretto-jdk=1:$version \
+    && apt-get purge -y --auto-remove -o APT::AutoRemove::RecommendsImportant=false \
+        curl gnupg software-properties-common
+
+ENV LANG C.UTF-8
+ENV JAVA_HOME=/usr/lib/jvm/java-17-amazon-corretto
+
+EXPOSE 8000
+EXPOSE 8080
+EXPOSE 8081
+
+ARG JAR_FILE=*.jar
+ARG SERVICE_VERSION
+ARG SERVICE_NAME="loggerator-app"
+ARG SERVICE_DIR=/opt/loggerator
+
+WORKDIR /var/${SERVICE_NAME}
+
+LABEL SERVICE_NAME=${SERVICE_NAME}
+LABEL SERVICE_VERSION=${SERVICE_VERSION}
+
+ENV JAR_FILE=${JAR_FILE}
+ENV LOGS_DIR=/var/log/loggerator
+ENV TZ="America/New_York"
+
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y \
+    apt-utils \
+    curl \
+    logrotate \
+    sudo \
+    vim
+
+RUN adduser --disabled-password --gecos "" --shell /bin/sh --no-create-home loggerator-app \
+    && usermod -aG sudo loggerator-app
+
+RUN mkdir -p /var/${SERVICE_NAME} \
+    && mkdir -p /var/log/loggerator \
+    && chown ${SERVICE_NAME} /var/${SERVICE_NAME} \
+    && chown ${SERVICE_NAME} /var/log/loggerator/ \
+    && mkdir ${SERVICE_DIR} && chown -R ${SERVICE_NAME} ${SERVICE_DIR}
+
+WORKDIR /opt/loggerator
+
+ADD --chown=loggerator-app target/${JAR_FILE} /opt/loggerator
+ADD scripts/run.sh /opt/loggerator/run.sh
+RUN chown loggerator-app:loggerator-app /opt/loggerator/run.sh /opt/loggerator/${JAR_FILE} \
+    && chmod 0744 /opt/loggerator/run.sh
+
+USER ${SERVICE_NAME}
+
+ENTRYPOINT ["/opt/loggerator/run.sh"]
